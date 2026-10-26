@@ -1,0 +1,7 @@
+{
+  "name": "jcrec-settings-form",
+  "private": true,
+  "description": "Tests for the settings form; the form itself needs no build step.",
+  "devDependencies": { "jsdom": "26.1.0" },
+  "scripts": { "test": "node tests/form_test.js" }
+}

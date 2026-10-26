@@ -9,3 +9,5 @@ This repo holds only the blank form. No family data is stored or sent here:
 - The bot checks every answer again before saving it, and accepts answers only from families it has invited.
 
 Opened in a regular browser, the form shows a note and can't save.
+
+Tests run on every push: `npm ci --ignore-scripts && npm test` checks the form in a simulated browser (jsdom), including that it works when opened from a chat button.

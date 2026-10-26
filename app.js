@@ -95,18 +95,39 @@
     const wkWrap = el("div", { class: "check" });
     wkWrap.append(weekends, el("label", { for: weekends.id }, "Weekends at any time"));
     card.appendChild(wkWrap);
-    card.appendChild(labelled("Swim classes", select(`swim${n}`, LEVELS, data.swim_level)));
 
+    // Every activity is listed and ticked unless skipped. The swim level sits under Swim and shows
+    // only while Swim is ticked, so it reads as a detail of one activity, not the point of the form.
     const skip = new Set(data.exclude_categories || ["Adaptive Recreation"]);
-    const details = el("details");
-    details.appendChild(el("summary", {}, "Skip these categories"));
-    CATEGORIES.concat([...skip].filter((c) => !CATEGORIES.includes(c))).forEach((cat, i) => {
-      const box = el("input", { type: "checkbox", id: `cat${n}_${i}`, value: cat, checked: skip.has(cat) });
+    const all = CATEGORIES.concat([...skip].filter((c) => !CATEGORIES.includes(c)));
+    const acts = el("details", { class: "activities" });
+    const summary = el("summary");
+    acts.appendChild(summary);
+    const boxes = [];
+    const updateSummary = () => {
+      const on = boxes.filter((b) => b.checked).length;
+      summary.textContent = (on === boxes.length ? `Activities: all ${on}` : `Activities: ${on} of ${boxes.length}`)
+        + " (tap to change)";
+    };
+    all.forEach((cat, i) => {
+      const box = el("input", { type: "checkbox", id: `act${n}_${i}`, value: cat, checked: !skip.has(cat) });
+      boxes.push(box);
       const line = el("div", { class: "check" });
       line.append(box, el("label", { for: box.id }, cat));
-      details.appendChild(line);
+      acts.appendChild(line);
+      if (cat === "Swim") {
+        const level = select(`swim${n}`, LEVELS, data.swim_level);
+        const levelRow = el("div", { class: "field nested" });
+        levelRow.append(el("label", { for: level.id }, "Swim level"), level);
+        acts.appendChild(levelRow);
+        const syncSwim = () => { levelRow.hidden = !box.checked; };
+        box.addEventListener("change", syncSwim);
+        syncSwim();
+      }
+      box.addEventListener("change", updateSummary);
     });
-    card.appendChild(details);
+    updateSummary();
+    card.appendChild(acts);
 
     const remove = el("button", { type: "button", class: "remove" }, "Remove this kid");
     remove.addEventListener("click", () => { card.remove(); refresh(); });
@@ -137,8 +158,12 @@
     kid.weekday_earliest = get("time").value || null;
     kid.weekends = get("weekends").checked;
     if (!kid.weekday_earliest && !kid.weekends) throw new Error(`${kid.name} needs weekday times, weekends, or both.`);
-    kid.swim_level = get("swim").value ? Number(get("swim").value) : null;
-    kid.exclude_categories = [...card.querySelectorAll("details input:checked")].map((b) => b.value);
+    const boxes = [...card.querySelectorAll(".activities input[type=checkbox]")];
+    kid.exclude_categories = boxes.filter((b) => !b.checked).map((b) => b.value);
+    if (boxes.length && kid.exclude_categories.length === boxes.length) throw new Error(`Pick at least one activity for ${kid.name}.`);
+    const swimBox = boxes.find((b) => b.value === "Swim");
+    const level = get("swim");
+    kid.swim_level = swimBox && swimBox.checked && level && level.value ? Number(level.value) : null;
     return kid;
   }
 
