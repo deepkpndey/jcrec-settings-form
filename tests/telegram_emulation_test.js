@@ -13,6 +13,7 @@
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
+const { telegramHost, events, pressSave } = require("./telegram_host");
 
 const ROOT = path.join(__dirname, "..");
 const ORIGIN = "https://form.test";
@@ -32,28 +33,6 @@ async function fetchTelegramScript() {
   const res = await fetch(TELEGRAM_JS);
   if (!res.ok) throw new Error(`couldn't fetch ${TELEGRAM_JS}: HTTP ${res.status}`);
   return res.text();
-}
-
-// Installed before any page script runs: a stand-in for the Telegram app.
-function telegramHost({ storage, answerStorage }) {
-  window.__tg = { events: [], storage: { ...storage } };
-  window.TelegramWebviewProxy = {
-    postEvent(type, data) {
-      const payload = data ? JSON.parse(data) : null;
-      window.__tg.events.push({ type, payload });
-      if (type !== "web_app_invoke_custom_method" || !answerStorage) return;
-      const { req_id, method, params } = payload;
-      let result;
-      if (method === "getStorageValues") {
-        result = {};
-        params.keys.forEach((k) => { result[k] = window.__tg.storage[k] || ""; });
-      } else if (method === "saveStorageValue") {
-        window.__tg.storage[params.key] = params.value;
-        result = true;
-      }
-      setTimeout(() => window.Telegram.WebView.receiveEvent("custom_method_invoked", { req_id, result }), 10);
-    },
-  };
 }
 
 async function open(browser, script, { hash = launch("9.1"), host = true, storage = {}, answerStorage = true } = {}) {
@@ -78,8 +57,6 @@ async function open(browser, script, { hash = launch("9.1"), host = true, storag
   return { page, blocked };
 }
 
-const events = (page, type) => page.evaluate((t) => window.__tg.events.filter((e) => e.type === t).map((e) => e.payload), type);
-const pressSave = (page) => page.evaluate(() => window.Telegram.WebView.receiveEvent("main_button_pressed"));
 async function sentData(page) {
   await page.waitForTimeout(100);
   const sent = await events(page, "web_app_data_send");
