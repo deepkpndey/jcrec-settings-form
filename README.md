@@ -10,4 +10,4 @@ This repo holds only the blank form. No family data is stored or sent here:
 
 Opened in a regular browser, the form shows a note and can't save.
 
-Tests run on every push: `npm ci --ignore-scripts && npm test` checks the form in a simulated browser (jsdom), including that it works when opened from a chat button.
+Tests run on every push and weekly: `tests/telegram_emulation_test.js` opens the form in headless Chromium with Telegram's real `telegram-web-app.js`, while the test plays the Telegram app's part through the same documented messages a phone uses. It covers a chat-button launch (which carries no user data), prefilling, Telegram's Save button, storage that never answers, an old Telegram app, a plain browser, and that the page makes no other network requests. Run it with `npm ci --ignore-scripts && npx playwright install chromium && npm test`.

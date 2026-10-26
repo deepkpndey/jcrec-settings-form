@@ -3,6 +3,10 @@ name: Tests
 on:
   push:
   workflow_dispatch:
+  schedule:
+    # Weekly, because the test loads Telegram's live telegram-web-app.js: a change on
+    # Telegram's side shows up here even when this repo hasn't changed.
+    - cron: "41 13 * * 1"
 
 permissions:
   contents: read
@@ -10,9 +14,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
       - run: node --check app.js
-      - run: node tests/form_test.js
+      - run: npm test
