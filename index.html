@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Only this site and Telegram's Mini App script may run; the page loads nothing else and sends nothing anywhere. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self' https://telegram.org; style-src 'self'; form-action 'none'; base-uri 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Kids' settings</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Your kids</h1>
+    <p class="hint">The evening message lists programs that fit these settings. Nothing leaves this form until you tap Save.</p>
+    <p id="outside" class="warn" hidden>Open this from the Settings button in the bot's chat to save changes.</p>
+    <div id="kids"></div>
+    <button type="button" id="add" class="secondary">Add a kid</button>
+    <p id="error" class="warn" role="alert" hidden></p>
+  </main>
+</body>
+</html>
