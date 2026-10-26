@@ -6,7 +6,10 @@
 // page with textContent or form values, never as HTML.
 (function () {
   const tg = window.Telegram && window.Telegram.WebApp;
-  const inTelegram = Boolean(tg && tg.initData);
+  // Telegram's script reports platform "unknown" outside Telegram. initData can't be used to tell:
+  // it stays empty when the form opens from a chat keyboard button, which is how the bot opens it.
+  const inTelegram = Boolean(tg && tg.platform && tg.platform !== "unknown");
+  const STORAGE_WAIT_MS = 1500; // carry on without CloudStorage if it doesn't answer
   const STORAGE_KEY = "settings_v1";
   const MAX_KIDS = 6;
   const MAX_BYTES = 4096; // the most sendData can carry
@@ -152,9 +155,14 @@
       const payload = JSON.stringify({ v: 1, kids: kids });
       if (new TextEncoder().encode(payload).length > MAX_BYTES) throw new Error("That's too much to save; remove a kid or some categories.");
       showError("");
-      const send = () => tg.sendData(payload); // closes the form
-      if (tg.isVersionAtLeast && tg.isVersionAtLeast("6.9")) tg.CloudStorage.setItem(STORAGE_KEY, payload, send);
-      else send();
+      let sent = false;
+      const send = () => { if (!sent) { sent = true; tg.sendData(payload); } }; // closes the form
+      if (tg.isVersionAtLeast && tg.isVersionAtLeast("6.9")) {
+        tg.CloudStorage.setItem(STORAGE_KEY, payload, send);
+        setTimeout(send, STORAGE_WAIT_MS); // saving the prefill copy must never block the real save
+      } else {
+        send();
+      }
     } catch (e) {
       showError(e.message);
     }
@@ -172,13 +180,17 @@
   tg.MainButton.setText("Save");
   tg.MainButton.onClick(save);
   tg.MainButton.show();
+  let rendered = false;
   const render = (stored) => {
+    if (rendered) return;
+    rendered = true;
     let kids = [];
     try { kids = (JSON.parse(stored || "{}").kids || []).slice(0, MAX_KIDS); } catch (e) { kids = []; }
     if (kids.length) kids.forEach(addKid); else addKid();
   };
   if (tg.isVersionAtLeast && tg.isVersionAtLeast("6.9")) {
     tg.CloudStorage.getItem(STORAGE_KEY, (err, value) => render(err ? "" : value));
+    setTimeout(() => render(""), STORAGE_WAIT_MS);
   } else {
     render("");
   }
