@@ -20,8 +20,13 @@ const TELEGRAM_JS = "https://telegram.org/js/telegram-web-app.js";
 const THEME = { bg_color: "#ffffff", text_color: "#000000", hint_color: "#999999", button_color: "#2481cc",
   button_text_color: "#ffffff", secondary_bg_color: "#f0f0f0" };
 const launch = (version) => `#tgWebAppVersion=${version}&tgWebAppPlatform=ios&tgWebAppThemeParams=${encodeURIComponent(JSON.stringify(THEME))}`;
+// Saved by the form before per-day times; the current form must read it and save the per-day shape.
 const STORED = { v: 1, kids: [{ name: "Kid", age: 8, weekday_earliest: "18:00", weekends: true, swim_level: 2,
   exclude_categories: ["Adaptive Recreation"] }] };
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const STORED_AS_DAYS = { v: 1, kids: [{ name: "Kid", age: 8, swim_level: 2, exclude_categories: ["Adaptive Recreation"],
+  days: Object.fromEntries(DAYS.map((d) => [d, d === "Saturday" || d === "Sunday" ? "00:00" : "18:00"])) }] };
+const SHOTS = process.env.SCREENSHOT_DIR; // optional: save screenshots there to look at the layout
 
 async function fetchTelegramScript() {
   const res = await fetch(TELEGRAM_JS);
@@ -85,6 +90,8 @@ async function sentData(page) {
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x)
   ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 
+const WEEKDAYS_ALL = (values, v) => values.length === 5 && values.every((x) => x === v);
+
 const results = [];
 function check(name, ok, detail) {
   results.push(`${ok ? "PASS" : "FAIL"} ${name}${!ok && detail !== undefined ? "  got: " + JSON.stringify(detail) : ""}`);
@@ -103,7 +110,7 @@ function check(name, ok, detail) {
     check("Telegram's Save button is set up and shown", button && button.is_visible && button.text === "Save", button);
     check("form is prefilled from Telegram storage", (await page.inputValue("#name1")) === "Kid");
     await pressSave(page);
-    check("Save sends the saved settings unchanged", canonical(await sentData(page)) === canonical(STORED),
+    check("Save sends the saved settings, in the per-day shape", canonical(await sentData(page)) === canonical(STORED_AS_DAYS),
       await sentData(page));
     check("the form made no other network requests", blocked.length === 0, blocked);
     await page.close();
@@ -124,6 +131,40 @@ function check(name, ok, detail) {
       sent.kids[0].swim_level === null && sent.kids[0].exclude_categories.includes("Swim"), sent);
     check("Save also keeps a copy in Telegram storage for next time",
       (await page.evaluate(() => window.__tg.storage.settings_v1 || "")).includes("Maya"));
+    await page.close();
+
+    // 2b. A parent sets days separately.
+    ({ page } = await open(browser, script));
+    await page.fill("#name1", "Maya");
+    await page.fill("#age1", "8");
+    check("defaults: weekdays from 6:00 PM, weekends any time",
+      (await page.inputValue("#weekdays1")) === "18:00" && (await page.inputValue("#weekends1")) === "00:00");
+    await page.locator(".per-day summary").click();
+    await page.selectOption("#day1_Wednesday", "not");
+    await page.selectOption("#day1_Saturday", "09:00");
+    check("changing single days shows 'Different each day' on both groups",
+      (await page.inputValue("#weekdays1")) === "mixed" && (await page.inputValue("#weekends1")) === "mixed");
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "per-day.png"), fullPage: true });
+    await pressSave(page);
+    let days = ((await sentData(page)) || { kids: [{}] }).kids[0].days || {};
+    check("Save sends a time for each day",
+      days.Monday === "18:00" && days.Wednesday === null && days.Saturday === "09:00" && days.Sunday === "00:00", days);
+    await page.selectOption("#weekdays1", "17:00");
+    check("choosing a weekday time sets every weekday, Wednesday included",
+      WEEKDAYS_ALL(await Promise.all(DAYS.slice(0, 5).map((d) => page.inputValue(`#day1_${d}`))), "17:00"));
+    for (const d of DAYS) await page.selectOption(`#day1_${d}`, "not");
+    const before = (await events(page, "web_app_data_send")).length;
+    await pressSave(page);
+    check("no days at all is refused with a message",
+      (await events(page, "web_app_data_send")).length === before && /at least one day/.test(await page.textContent("#error")));
+    await page.close();
+
+    // 2c. A prefilled kid with different days opens with the per-day section showing.
+    const mixed = { v: 1, kids: [{ ...STORED_AS_DAYS.kids[0], days: { ...STORED_AS_DAYS.kids[0].days, Tuesday: null } }] };
+    ({ page } = await open(browser, script, { storage: { settings_v1: JSON.stringify(mixed) } }));
+    check("different days open 'Set days separately' and keep Tuesday off",
+      (await page.locator(".per-day").getAttribute("open")) !== null && (await page.inputValue("#day1_Tuesday")) === "not");
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "prefilled-mixed.png"), fullPage: true });
     await page.close();
 
     // 3. Telegram never answers the storage requests.

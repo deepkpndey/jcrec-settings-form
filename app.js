@@ -17,9 +17,18 @@
   const CATEGORIES = ["Adaptive Recreation", "Adult", "Basketball", "Boxing", "Cheerleading", "Chilltown Social",
     "Cricket", "Dance", "Flag Football", "Football", "Martial Arts", "Pickelball", "Rugby", "Soccer", "Swim",
     "Track and Field"];
-  const TIMES = [["", "No weekday programs"], ["15:00", "3:00 PM"], ["15:30", "3:30 PM"], ["16:00", "4:00 PM"],
-    ["16:30", "4:30 PM"], ["17:00", "5:00 PM"], ["17:30", "5:30 PM"], ["18:00", "6:00 PM"], ["18:30", "6:30 PM"],
-    ["19:00", "7:00 PM"]];
+  const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const WEEKDAYS = DAYS.slice(0, 5);
+  const WEEKEND = DAYS.slice(5);
+  // Each day's value: "00:00" any time, "HH:MM" from that time, NOT for not that day. The bot reads
+  // the same values (null for NOT).
+  const NOT = "not";
+  const MIXED = "mixed"; // shown, never chosen, when the days in a group differ
+  const START_TIMES = [["00:00", "Any time"], ["08:00", "From 8:00 AM"], ["09:00", "From 9:00 AM"],
+    ["10:00", "From 10:00 AM"], ["11:00", "From 11:00 AM"], ["12:00", "From 12:00 PM"], ["13:00", "From 1:00 PM"],
+    ["14:00", "From 2:00 PM"], ["15:00", "From 3:00 PM"], ["15:30", "From 3:30 PM"], ["16:00", "From 4:00 PM"],
+    ["16:30", "From 4:30 PM"], ["17:00", "From 5:00 PM"], ["17:30", "From 5:30 PM"], ["18:00", "From 6:00 PM"],
+    ["18:30", "From 6:30 PM"], ["19:00", "From 7:00 PM"]];
   const LEVELS = [["", "Any level"], ["1", "LTS 1"], ["2", "LTS 2"], ["3", "LTS 3"], ["4", "LTS 4"],
     ["5", "LTS 5"], ["6", "LTS 6"]];
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
@@ -55,8 +64,16 @@
     return wrap;
   }
 
+  // Settings saved before per-day times had weekday_earliest and weekends; read either shape.
+  function daysFrom(data) {
+    if (data.days) return Object.fromEntries(DAYS.map((d) => [d, data.days[d] === undefined ? null : data.days[d]]));
+    const weekday = data.weekday_earliest === undefined ? "18:00" : data.weekday_earliest;
+    const weekend = data.weekends === false ? null : "00:00";
+    return Object.fromEntries(DAYS.map((d) => [d, WEEKEND.includes(d) ? weekend : weekday]));
+  }
+
   function addKid(data) {
-    data = data || { weekday_earliest: "18:00", weekends: true };
+    data = data || {};
     const n = ++counter;
     const card = el("section", { class: "kid" });
     const name = el("input", { id: `name${n}`, type: "text", maxlength: 30, autocomplete: "off", value: data.name || "" });
@@ -89,12 +106,43 @@
     rBirth.addEventListener("change", syncMode);
     syncMode();
 
-    card.appendChild(labelled("Weekday programs starting at or after",
-      select(`time${n}`, TIMES, data.weekday_earliest === undefined ? "18:00" : data.weekday_earliest)));
-    const weekends = el("input", { type: "checkbox", id: `weekends${n}`, checked: data.weekends !== false });
-    const wkWrap = el("div", { class: "check" });
-    wkWrap.append(weekends, el("label", { for: weekends.id }, "Weekends at any time"));
-    card.appendChild(wkWrap);
+    // Weekdays and Weekends set every day in their group; "Set days separately" changes one day at
+    // a time, and the group's dropdown then reads "Different each day". The seven day dropdowns are
+    // what gets saved.
+    const days = daysFrom(data);
+    const asOption = (v) => (v === null ? NOT : v);
+    card.appendChild(el("h2", {}, "When can they go?"));
+    const groupSelect = (id, notLabel) => {
+      const s = select(id, START_TIMES.concat([[NOT, notLabel], [MIXED, "Different each day"]]), "");
+      s.querySelector(`option[value="${MIXED}"]`).disabled = true;
+      return s;
+    };
+    const weekdaySel = groupSelect(`weekdays${n}`, "Not on weekdays");
+    const weekendSel = groupSelect(`weekends${n}`, "Not on weekends");
+    card.append(labelled("Weekdays", weekdaySel), labelled("Weekends", weekendSel));
+    const perDay = el("details", { class: "per-day" });
+    perDay.appendChild(el("summary", {}, "Set days separately"));
+    const daySels = {};
+    DAYS.forEach((d) => {
+      daySels[d] = select(`day${n}_${d}`, START_TIMES.concat([[NOT, "Not this day"]]), asOption(days[d]));
+      const line = labelled(d, daySels[d]);
+      line.classList.add("day");
+      perDay.appendChild(line);
+    });
+    card.appendChild(perDay);
+    const groupValue = (group) => {
+      const values = group.map((d) => daySels[d].value);
+      return values.every((v) => v === values[0]) ? values[0] : MIXED;
+    };
+    const syncGroups = () => { weekdaySel.value = groupValue(WEEKDAYS); weekendSel.value = groupValue(WEEKEND); };
+    const fillGroup = (group, sel) => {
+      if (sel.value !== MIXED) group.forEach((d) => { daySels[d].value = sel.value; });
+    };
+    weekdaySel.addEventListener("change", () => fillGroup(WEEKDAYS, weekdaySel));
+    weekendSel.addEventListener("change", () => fillGroup(WEEKEND, weekendSel));
+    DAYS.forEach((d) => daySels[d].addEventListener("change", syncGroups));
+    syncGroups();
+    if (weekdaySel.value === MIXED || weekendSel.value === MIXED) perDay.open = true;
 
     // Every activity is listed and ticked unless skipped. The swim level sits under Swim and shows
     // only while Swim is ticked, so it reads as a detail of one activity, not the point of the form.
@@ -155,9 +203,11 @@
       if (a === "" || Number(a) < 0 || Number(a) > 18) throw new Error(`Enter ${kid.name}'s age (0 to 18).`);
       kid.age = Number(a);
     }
-    kid.weekday_earliest = get("time").value || null;
-    kid.weekends = get("weekends").checked;
-    if (!kid.weekday_earliest && !kid.weekends) throw new Error(`${kid.name} needs weekday times, weekends, or both.`);
+    kid.days = Object.fromEntries(DAYS.map((d) => {
+      const v = document.getElementById(`day${n}_${d}`).value;
+      return [d, v === NOT ? null : v];
+    }));
+    if (DAYS.every((d) => kid.days[d] === null)) throw new Error(`Pick at least one day for ${kid.name}.`);
     const boxes = [...card.querySelectorAll(".activities input[type=checkbox]")];
     kid.exclude_categories = boxes.filter((b) => !b.checked).map((b) => b.value);
     if (boxes.length && kid.exclude_categories.length === boxes.length) throw new Error(`Pick at least one activity for ${kid.name}.`);
