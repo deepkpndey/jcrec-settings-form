@@ -25,7 +25,11 @@ const launch = (version) => `#tgWebAppVersion=${version}&tgWebAppPlatform=ios&tg
 const STORED = { v: 1, kids: [{ name: "Kid", age: 8, weekday_earliest: "18:00", weekends: true, swim_level: 2,
   exclude_categories: ["Adaptive Recreation"] }] };
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const STORED_AS_DAYS = { v: 1, kids: [{ name: "Kid", age: 8, swim_level: 2, exclude_categories: ["Adaptive Recreation"],
+// The test's own copy of the estimate rule (5 by October 1 to start kindergarten).
+const estimateFor = (y, m) => String(Math.max(0, (new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1) - (m <= 9 ? y + 5 : y + 6)));
+const SCHOOL_YEAR = new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+const STORED_AS_DAYS = { v: 1, kids: [{ name: "Kid", age: 8, grade: "3", grade_year: SCHOOL_YEAR, swim_level: 2,
+  exclude_categories: ["Adaptive Recreation"],
   days: Object.fromEntries(DAYS.map((d) => [d, d === "Saturday" || d === "Sunday" ? "00:00" : "18:00"])) }] };
 const SHOTS = process.env.SCREENSHOT_DIR; // optional: save screenshots there to look at the layout
 
@@ -134,6 +138,36 @@ function check(name, ok, detail) {
     await pressSave(page);
     check("no days at all is refused with a message",
       (await events(page, "web_app_data_send")).length === before && /at least one day/.test(await page.textContent("#error")));
+    await page.close();
+
+    // 2b2. Grade: an estimate that follows the age until the parent picks one.
+    ({ page } = await open(browser, script));
+    await page.fill("#name1", "Gia");
+    await page.fill("#age1", "8");
+    check("grade estimate follows the age (8 -> 3rd)", (await page.inputValue("#grade1")) === "3");
+    await page.check("#modeBirth1");
+    await page.selectOption("#month1", "12");
+    await page.selectOption("#year1", "2017");
+    check("or the birth month (Dec 2017 -> 3rd), and says so",
+      (await page.inputValue("#grade1")) === estimateFor(2017, 12) && /birth month/.test(await page.textContent(".grade-hint")));
+    await page.check("#modeAge1");
+    await page.fill("#age1", "10");
+    check("and updates when the age changes (10 -> 5th)", (await page.inputValue("#grade1")) === "5");
+    await page.selectOption("#grade1", "4");
+    await page.fill("#age1", "11");
+    check("a grade the parent picked stays put", (await page.inputValue("#grade1")) === "4");
+    await pressSave(page);
+    let g = ((await sentData(page)) || { kids: [{}] }).kids[0];
+    check("Save sends the grade and its school year", g.grade === "4" && g.grade_year === SCHOOL_YEAR, g);
+    await page.selectOption("#grade1", "");
+    await pressSave(page);
+    g = ((await sentData(page)) || { kids: [{}] }).kids[0];
+    check("'Not set' sends no grade", g.grade === undefined && g.grade_year === undefined, g);
+    await page.close();
+
+    const lastYear = { v: 1, kids: [{ ...STORED_AS_DAYS.kids[0], grade: "2", grade_year: SCHOOL_YEAR - 1 }] };
+    ({ page } = await open(browser, script, { storage: { settings_v1: JSON.stringify(lastYear) } }));
+    check("a grade saved last school year opens one grade higher", (await page.inputValue("#grade1")) === "3");
     await page.close();
 
     // 2c. A prefilled kid with different days opens with the per-day section showing.

@@ -31,6 +31,20 @@
     ["18:30", "From 6:30 PM"], ["19:00", "From 7:00 PM"]];
   const LEVELS = [["", "Any level"], ["1", "LTS 1"], ["2", "LTS 2"], ["3", "LTS 3"], ["4", "LTS 4"],
     ["5", "LTS 5"], ["6", "LTS 6"]];
+  // School grades, as the bot stores them. A grade belongs to a school year (which starts each
+  // September), so it moves up by itself every September 1.
+  const GRADES = [["Pre-K", "Pre-K"], ["K", "Kindergarten"]].concat(
+    Array.from({ length: 12 }, (_, i) => [String(i + 1), `${i + 1}${["st", "nd", "rd"][i] || "th"} grade`]));
+  const gradeIndex = (g) => GRADES.findIndex(([v]) => v === g);
+  const schoolYear = (d) => (d.getMonth() >= 8 ? d.getFullYear() : d.getFullYear() - 1);
+  // A starting guess, assuming a kid must be 5 by October 1 to start kindergarten; the parent can change it.
+  function estimateGrade(birthYear, birthMonth, age) {
+    let g;
+    if (birthYear && birthMonth) g = schoolYear(new Date()) - (Number(birthMonth) <= 9 ? Number(birthYear) + 5 : Number(birthYear) + 6);
+    else if (age !== "" && age !== undefined && age !== null) g = Number(age) - 5;
+    else return "";
+    return GRADES[Math.max(0, Math.min(GRADES.length - 1, g + 1))][0];
+  }
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
     "October", "November", "December"];
 
@@ -101,7 +115,30 @@
     row.append(month, year);
     birthField.appendChild(row);
     card.append(ageField, birthField);
-    const syncMode = () => { ageField.hidden = rBirth.checked; birthField.hidden = !rBirth.checked; };
+
+    // Grade: the saved one, moved up for each September since it was saved, or else an estimate that
+    // follows the age or birth month until the parent picks a grade themselves.
+    let saved = "";
+    if (data.grade !== undefined && data.grade !== null && gradeIndex(String(data.grade)) >= 0) {
+      const moved = gradeIndex(String(data.grade)) + (data.grade_year ? schoolYear(new Date()) - Number(data.grade_year) : 0);
+      saved = GRADES[Math.max(0, Math.min(GRADES.length - 1, moved))][0];
+    }
+    const grade = select(`grade${n}`, [["", "Not set"]].concat(GRADES), saved);
+    const gradeField = labelled("School grade this year", grade);
+    const gradeHint = el("p", { class: "hint grade-hint" }, "Estimated from the age. Change it if it's wrong.");
+    gradeField.appendChild(gradeHint);
+    card.appendChild(gradeField);
+    let gradeChosen = Boolean(saved);
+    const syncGrade = () => {
+      if (gradeChosen) { gradeHint.hidden = true; return; }
+      grade.value = rBirth.checked ? estimateGrade(year.value, month.value) : estimateGrade(null, null, age.value);
+      gradeHint.textContent = `Estimated from the ${rBirth.checked ? "birth month" : "age"}. Change it if it's wrong.`;
+      gradeHint.hidden = !grade.value;
+    };
+    grade.addEventListener("change", () => { gradeChosen = true; gradeHint.hidden = true; });
+    [age, year, month].forEach((c) => c.addEventListener(c === age ? "input" : "change", syncGrade));
+
+    const syncMode = () => { ageField.hidden = rBirth.checked; birthField.hidden = !rBirth.checked; syncGrade(); };
     rAge.addEventListener("change", syncMode);
     rBirth.addEventListener("change", syncMode);
     syncMode();
@@ -202,6 +239,11 @@
       const a = get("age").value;
       if (a === "" || Number(a) < 0 || Number(a) > 18) throw new Error(`Enter ${kid.name}'s age (0 to 18).`);
       kid.age = Number(a);
+    }
+    const g = get("grade").value;
+    if (g) {
+      kid.grade = g;
+      kid.grade_year = schoolYear(new Date());
     }
     kid.days = Object.fromEntries(DAYS.map((d) => {
       const v = document.getElementById(`day${n}_${d}`).value;
